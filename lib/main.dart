@@ -23,7 +23,35 @@ class App extends StatelessWidget {
       title: "ClassHub",
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFFB4232C),
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: const Color(0xFFB4232C),
+          secondary: const Color(0xFFE87561),
+          surface: const Color(0xFFFFFBF8),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFFF7F3),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF8F1D2C),
+          foregroundColor: Colors.white,
+          centerTitle: false,
+        ),
+        cardTheme: const CardThemeData(
+          color: Colors.white,
+          elevation: 2,
+          margin: EdgeInsets.zero,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(18)),
+          ),
+        ),
+        inputDecorationTheme: const InputDecorationTheme(
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.all(Radius.circular(14)),
+          ),
+        ),
         useMaterial3: true,
       ),
       home: sessaoAtiva ? const Home() : const Login(),

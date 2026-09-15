@@ -166,18 +166,30 @@ class TopicCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = topic.data();
+    final isAuthor = data['authorId'] == FirebaseAuth.instance.currentUser?.uid;
     final responses = FirebaseFirestore.instance
-        .collection('topics')
-        .doc(topic.id)
-        .collection('responses')
-        .orderBy('createdAt');
+      .collection('topics')
+      .doc(topic.id)
+      .collection('responses');
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: ExpansionTile(
-        leading: CircleAvatar(child: Text((data['category'] ?? '?')[0])),
+        shape: const RoundedRectangleBorder(),
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
+          foregroundColor: Theme.of(context).colorScheme.primary,
+          child: Text((data['category'] ?? '?')[0]),
+        ),
         title: Text(data['title'] ?? 'Sem título', style: const TextStyle(fontWeight: FontWeight.bold)),
         subtitle: Text('${data['category'] ?? 'Geral'} • ${data['authorEmail'] ?? 'Usuário'}'),
+        trailing: isAuthor
+            ? IconButton(
+                tooltip: 'Apagar tópico',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _apagarTopico(context),
+              )
+            : null,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -186,19 +198,23 @@ class TopicCard extends StatelessWidget {
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: responses.snapshots(),
             builder: (context, snapshot) {
-              final docs = snapshot.data?.docs ?? [];
+              final docs = [...(snapshot.data?.docs ?? [])];
+              docs.sort((a, b) {
+                final votosA = (a.data()['votesCount'] as num?)?.toInt() ?? 0;
+                final votosB = (b.data()['votesCount'] as num?)?.toInt() ?? 0;
+                if (votosA != votosB) return votosB.compareTo(votosA);
+                final dataA = a.data()['createdAt'] as Timestamp?;
+                final dataB = b.data()['createdAt'] as Timestamp?;
+                return (dataB?.compareTo(dataA ?? Timestamp(0, 0)) ?? 0);
+              });
               return Column(
                 children: [
                   if (docs.isNotEmpty)
-                    ...docs.map((doc) => ListTile(
-                          dense: true,
-                          leading: const Icon(Icons.reply, size: 18),
-                          title: Text(doc.data()['text'] ?? ''),
-                          subtitle: Text(doc.data()['authorEmail'] ?? 'Usuário'),
-                        )),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: ResponseButton(topicId: topic.id),
+                    ...docs.map((doc) => ResponseTile(response: doc)),
+                  if (!isAuthor)
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: ResponseButton(topicId: topic.id),
                   ),
                 ],
               );
@@ -207,6 +223,151 @@ class TopicCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _apagarTopico(BuildContext context) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Apagar tópico?'),
+        content: const Text('O tópico e todas as respostas dele serão removidos.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Apagar')),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+
+    final respostas = await topic.reference.collection('responses').get();
+    final batch = FirebaseFirestore.instance.batch();
+    for (final resposta in respostas.docs) {
+      final votos = await resposta.reference.collection('votes').get();
+      for (final voto in votos.docs) {
+        batch.delete(voto.reference);
+      }
+      batch.delete(resposta.reference);
+    }
+    batch.delete(topic.reference);
+    await batch.commit();
+  }
+}
+
+class ResponseTile extends StatelessWidget {
+  final QueryDocumentSnapshot<Map<String, dynamic>> response;
+
+  const ResponseTile({super.key, required this.response});
+
+  @override
+  Widget build(BuildContext context) {
+    final data = response.data();
+    final votes = (data['votesCount'] as num?)?.toInt() ?? 0;
+    final userId = FirebaseAuth.instance.currentUser?.uid;
+    final vote = response.reference.collection('votes').doc(userId);
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: userId == null ? null : vote.snapshots(),
+      builder: (context, snapshot) {
+        final voted = snapshot.data?.exists ?? false;
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: CircleAvatar(
+            radius: 18,
+            backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: const Icon(Icons.reply, size: 18),
+          ),
+          title: Text(data['text'] ?? ''),
+          subtitle: Text(data['authorEmail'] ?? 'Usuário'),
+          trailing: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: () => _alternarVoto(context, response.reference, vote),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: Icon(
+                        voted ? Icons.favorite : Icons.favorite_border,
+                        color: voted ? const Color(0xFFC53D4A) : Colors.grey,
+                        size: 21,
+                      ),
+                    ),
+                  ),
+                  if (data['authorId'] == userId)
+                    IconButton(
+                      tooltip: 'Apagar resposta',
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      onPressed: () => _apagarResposta(context, response.reference),
+                    ),
+                ],
+              ),
+              Text('$votes', style: Theme.of(context).textTheme.labelMedium),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _alternarVoto(
+    BuildContext context,
+    DocumentReference<Map<String, dynamic>> response,
+    DocumentReference<Map<String, dynamic>> vote,
+  ) async {
+    try {
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final responseSnapshot = await transaction.get(response);
+        final voteSnapshot = await transaction.get(vote);
+        final currentVotes = (responseSnapshot.data()?['votesCount'] as num?)?.toInt() ?? 0;
+        if (voteSnapshot.exists) {
+          transaction.delete(vote);
+          transaction.update(response, {'votesCount': currentVotes > 0 ? currentVotes - 1 : 0});
+        } else {
+          transaction.set(vote, {'createdAt': FieldValue.serverTimestamp()});
+          transaction.update(response, {'votesCount': currentVotes + 1});
+        }
+      });
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível registrar o voto.')),
+      );
+    }
+  }
+
+  Future<void> _apagarResposta(
+    BuildContext context,
+    DocumentReference<Map<String, dynamic>> response,
+  ) async {
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Apagar resposta?'),
+        content: const Text('Essa ação não pode ser desfeita.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          FilledButton.tonal(onPressed: () => Navigator.pop(context, true), child: const Text('Apagar')),
+        ],
+      ),
+    );
+    if (confirmar != true) return;
+    try {
+      final votos = await response.collection('votes').get();
+      final batch = FirebaseFirestore.instance.batch();
+      for (final voto in votos.docs) {
+        batch.delete(voto.reference);
+      }
+      batch.delete(response);
+      await batch.commit();
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível apagar a resposta.')),
+      );
+    }
   }
 }
 
@@ -236,6 +397,14 @@ class ResponseButton extends StatelessWidget {
     if (texto == null || texto.isEmpty) return;
 
     final user = FirebaseAuth.instance.currentUser!;
+    final topico = await FirebaseFirestore.instance.collection('topics').doc(topicId).get();
+    if (topico.data()?['authorId'] == user.uid) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('O autor não pode responder ao próprio tópico.')),
+      );
+      return;
+    }
     final resposta = FirebaseFirestore.instance
         .collection('topics')
         .doc(topicId)
@@ -251,6 +420,7 @@ class ResponseButton extends StatelessWidget {
           'authorId': user.uid,
           'authorEmail': user.email ?? 'Usuário',
           'createdAt': FieldValue.serverTimestamp(),
+          'votesCount': 0,
         });
       });
     } catch (e) {

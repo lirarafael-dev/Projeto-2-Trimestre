@@ -15,8 +15,9 @@ class Login extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           Padding(padding: EdgeInsets.all(16.0), child: LoginForm()),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               const SizedBox(width: 30),
               const Text(
