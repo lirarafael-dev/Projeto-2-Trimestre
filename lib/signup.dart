@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'authentication.dart';
 import 'home.dart';
 
@@ -13,30 +14,21 @@ class Signup extends StatelessWidget {
         children: <Widget>[
           const SizedBox(height: 80),
           const Padding(padding: EdgeInsets.all(8.0), child: SignupForm()),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
+          // Mantém o retorno para o login dentro do fluxo rolável do cadastro.
+          Padding(
+            padding: const EdgeInsets.only(top: 24, bottom: 12),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: <Widget>[
-                    const Text(
-                      'Já possui cadastro? ',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.pop(context);
-                      },
-                      child: const Text(
-                        'Faça o login',
-                        style: TextStyle(fontSize: 20, color: Colors.blue),
-                      ),
-                    ),
-                  ],
+                const Text(
+                  'Já possui cadastro? ',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Faça o login'),
                 ),
               ],
             ),

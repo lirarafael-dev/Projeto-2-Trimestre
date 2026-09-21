@@ -24,28 +24,36 @@ class TopicsPage extends StatefulWidget {
 
 class _TopicsPageState extends State<TopicsPage> {
   final _topics = FirebaseFirestore.instance.collection('topics');
+  final _pesquisaController = TextEditingController();
   String _categoria = 'Todas';
+  String _termoBusca = '';
   bool _meusTopicos = false;
+  bool _pesquisaAtiva = false;
+
+  static const _categorias = ['Todas', 'Dúvidas', 'Estudos', 'Eventos', 'Avisos'];
 
   Query<Map<String, dynamic>> get _consulta {
-    Query<Map<String, dynamic>> query = _topics.orderBy('createdAt', descending: true);
-    if (_categoria != 'Todas') {
-      query = query.where('category', isEqualTo: _categoria);
-    }
-    if (_meusTopicos) {
-      query = query.where(
-        'authorId',
-        isEqualTo: FirebaseAuth.instance.currentUser?.uid,
-      );
-    }
-    return query;
+    return _topics.orderBy('createdAt', descending: true);
+  }
+
+  @override
+  void dispose() {
+    _pesquisaController.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      drawer: Drawer(child: _painelLateral()),
       appBar: AppBar(
-        title: const Text('ClassHub'),
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('ClassHub'),
+            Text('Conecte-se, pergunte e compartilhe', style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal)),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Sair',
@@ -63,32 +71,15 @@ class _TopicsPageState extends State<TopicsPage> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          _filtros(),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _consulta.snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return const Center(child: Text('Não foi possível carregar os tópicos.'));
-                }
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final docs = snapshot.data!.docs;
-                if (docs.isEmpty) {
-                  return const Center(child: Text('Nenhum tópico encontrado.'));
-                }
-                return ListView.builder(
-                  padding: const EdgeInsets.all(12),
-                  itemCount: docs.length,
-                  itemBuilder: (_, index) => TopicCard(topic: docs[index]),
-                );
-              },
-            ),
-          ),
-        ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final painel = _painelLateral();
+          final conteudo = _listaTopicos();
+          if (constraints.maxWidth >= 800) {
+            return Row(children: [SizedBox(width: 248, child: painel), Expanded(child: conteudo)]);
+          }
+          return conteudo;
+        },
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _novoTopico,
@@ -98,29 +89,112 @@ class _TopicsPageState extends State<TopicsPage> {
     );
   }
 
-  Widget _filtros() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-      child: Row(
-        children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              initialValue: _categoria,
-              decoration: const InputDecoration(labelText: 'Categoria', border: OutlineInputBorder()),
-              items: ['Todas', 'Dúvidas', 'Estudos', 'Eventos', 'Avisos']
-                  .map((item) => DropdownMenuItem(value: item, child: Text(item)))
-                  .toList(),
-              onChanged: (value) => setState(() => _categoria = value!),
+  Widget _painelLateral() {
+    return Material(
+      color: const Color(0xFFFFF1EC),
+      child: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 24, 18, 18),
+          children: [
+            Row(children: [
+              Container(width: 42, height: 42, decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(13)), child: const Icon(Icons.forum_rounded, color: Colors.white)),
+              const SizedBox(width: 12),
+              const Text('Explorar', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            ]),
+            const SizedBox(height: 28),
+            const Text('VISUALIZAÇÃO', style: TextStyle(fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.bold, color: Colors.black54)),
+            const SizedBox(height: 8),
+            _menuItem(Icons.grid_view_rounded, 'Todos os tópicos', _categoria == 'Todas' && !_meusTopicos, () => _selecionarFiltro('Todas', false)),
+            _menuItem(Icons.person_outline_rounded, 'Meus tópicos', _meusTopicos, () => _selecionarFiltro(_categoria, true)),
+            _menuItem(Icons.search_rounded, 'Pesquisar tópicos', _pesquisaAtiva, _abrirPesquisa),
+            const SizedBox(height: 24),
+            const Text('CATEGORIAS', style: TextStyle(fontSize: 11, letterSpacing: 1.2, fontWeight: FontWeight.bold, color: Colors.black54)),
+            const SizedBox(height: 8),
+            ..._categorias.skip(1).map((categoria) => _menuItem(Icons.circle, categoria, _categoria == categoria && !_meusTopicos, () => _selecionarFiltro(categoria, false), smallIcon: true)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _menuItem(IconData icon, String label, bool selected, VoidCallback onTap, {bool smallIcon = false}) {
+    return ListTile(
+      dense: true,
+      visualDensity: const VisualDensity(vertical: -1),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      selected: selected,
+      selectedTileColor: const Color(0xFFFFDCD4),
+      leading: Icon(icon, size: smallIcon ? 10 : 20, color: selected ? Theme.of(context).colorScheme.primary : Colors.black54),
+      title: Text(label, style: TextStyle(fontWeight: selected ? FontWeight.bold : FontWeight.w500)),
+      onTap: onTap,
+    );
+  }
+
+  void _selecionarFiltro(String categoria, bool meusTopicos) {
+    setState(() {
+      _categoria = categoria;
+      _meusTopicos = meusTopicos;
+      _pesquisaAtiva = false;
+    });
+    if (MediaQuery.sizeOf(context).width < 800) Navigator.pop(context);
+  }
+
+  void _abrirPesquisa() {
+    setState(() => _pesquisaAtiva = true);
+    if (MediaQuery.sizeOf(context).width < 800) Navigator.pop(context);
+  }
+
+  Widget _listaTopicos() {
+    return Column(
+      children: [
+        if (_pesquisaAtiva)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            child: TextField(
+              controller: _pesquisaController,
+              autofocus: true,
+              onChanged: (value) => setState(() => _termoBusca = value.trim().toLowerCase()),
+              decoration: InputDecoration(
+                hintText: 'Buscar por título, descrição ou autor',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: IconButton(
+                  tooltip: 'Fechar pesquisa',
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => setState(() {
+                    _pesquisaAtiva = false;
+                    _termoBusca = '';
+                    _pesquisaController.clear();
+                  }),
+                ),
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          FilterChip(
-            label: const Text('Meus tópicos'),
-            selected: _meusTopicos,
-            onSelected: (value) => setState(() => _meusTopicos = value),
+        Expanded(
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: _consulta.snapshots(),
+            builder: (context, snapshot) {
+        if (snapshot.hasError) return const Center(child: Text('Não foi possível carregar os tópicos.'));
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        final userId = FirebaseAuth.instance.currentUser?.uid;
+        final docs = snapshot.data!.docs.where((doc) {
+          final data = doc.data();
+          final categoria = (data['category'] ?? '').toString().trim().toLowerCase();
+          final texto = '${data['title'] ?? ''} ${data['description'] ?? ''} ${data['authorEmail'] ?? ''}'.toLowerCase();
+          final categoriaOk = _categoria == 'Todas' || categoria == _categoria.toLowerCase();
+          final autorOk = !_meusTopicos || data['authorId'] == userId;
+          final buscaOk = _termoBusca.isEmpty || texto.contains(_termoBusca);
+          return categoriaOk && autorOk && buscaOk;
+        }).toList();
+        if (docs.isEmpty) return const Center(child: Text('Nenhum tópico encontrado.'));
+        return ListView.builder(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 100),
+          itemCount: docs.length,
+          itemBuilder: (_, index) => TopicCard(topic: docs[index]),
+        );
+            },
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -174,15 +248,19 @@ class TopicCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
+      elevation: 1,
       child: ExpansionTile(
         shape: const RoundedRectangleBorder(),
+        collapsedShape: const RoundedRectangleBorder(),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
         leading: CircleAvatar(
           backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
           foregroundColor: Theme.of(context).colorScheme.primary,
           child: Text((data['category'] ?? '?')[0]),
         ),
         title: Text(data['title'] ?? 'Sem título', style: const TextStyle(fontWeight: FontWeight.bold)),
-        subtitle: Text('${data['category'] ?? 'Geral'} • ${data['authorEmail'] ?? 'Usuário'}'),
+        subtitle: Text('${data['category'] ?? 'Geral'}  |  ${data['authorEmail'] ?? 'Usuário'}'),
         trailing: isAuthor
             ? IconButton(
                 tooltip: 'Apagar tópico',
@@ -239,17 +317,30 @@ class TopicCard extends StatelessWidget {
     );
     if (confirmar != true) return;
 
-    final respostas = await topic.reference.collection('responses').get();
-    final batch = FirebaseFirestore.instance.batch();
-    for (final resposta in respostas.docs) {
-      final votos = await resposta.reference.collection('votes').get();
-      for (final voto in votos.docs) {
-        batch.delete(voto.reference);
+    try {
+      final respostas = await topic.reference.collection('responses').get();
+      final referencias = <DocumentReference<Map<String, dynamic>>>[];
+      for (final resposta in respostas.docs) {
+        final votos = await resposta.reference.collection('votes').get();
+        referencias.addAll(votos.docs.map((voto) => voto.reference));
+        referencias.add(resposta.reference);
       }
-      batch.delete(resposta.reference);
+      referencias.add(topic.reference);
+
+      for (var inicio = 0; inicio < referencias.length; inicio += 400) {
+        final fim = (inicio + 400).clamp(0, referencias.length);
+        final batch = FirebaseFirestore.instance.batch();
+        for (final referencia in referencias.sublist(inicio, fim)) {
+          batch.delete(referencia);
+        }
+        await batch.commit();
+      }
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Não foi possível apagar o tópico. Tente novamente.')),
+      );
     }
-    batch.delete(topic.reference);
-    await batch.commit();
   }
 }
 

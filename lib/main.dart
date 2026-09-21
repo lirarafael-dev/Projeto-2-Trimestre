@@ -59,7 +59,6 @@ class App extends StatelessWidget {
   }
 }
 
-// Mantém compatibilidade com o teste padrão criado pelo Flutter.
 class MyApp extends App {
   const MyApp({super.key}) : super(sessaoAtiva: false);
 }
