@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'authentication.dart';
 import 'login.dart';
 
@@ -15,6 +14,7 @@ class Home extends StatelessWidget {
   }
 }
 
+// Tela principal do ClassHub, com filtros e pesquisa que mudam durante o uso.
 class TopicsPage extends StatefulWidget {
   const TopicsPage({super.key});
 
@@ -23,15 +23,21 @@ class TopicsPage extends StatefulWidget {
 }
 
 class _TopicsPageState extends State<TopicsPage> {
+  // Cada documento desta coleção representa um tópico publicado no ClassHub.
   final _topics = FirebaseFirestore.instance.collection('topics');
   final _pesquisaController = TextEditingController();
+  // "Todas" mostra tópicos de qualquer categoria.
   String _categoria = 'Todas';
+  // Texto usado para procurar título, descrição e autor.
   String _termoBusca = '';
+  // Quando ativo, restringe a lista aos tópicos do usuário autenticado.
   bool _meusTopicos = false;
   bool _pesquisaAtiva = false;
 
+  // Categorias que podem ser usadas para organizar os tópicos.
   static const _categorias = ['Todas', 'Dúvidas', 'Estudos', 'Eventos', 'Avisos'];
 
+  // Busca os tópicos mais recentes primeiro.
   Query<Map<String, dynamic>> get _consulta {
     return _topics.orderBy('createdAt', descending: true);
   }
@@ -55,6 +61,7 @@ class _TopicsPageState extends State<TopicsPage> {
           ],
         ),
         actions: [
+          // Encerra a sessão local e no Firebase e retorna à tela de login.
           IconButton(
             tooltip: 'Sair',
             icon: const Icon(Icons.logout),
@@ -89,6 +96,7 @@ class _TopicsPageState extends State<TopicsPage> {
     );
   }
 
+  // Reúne filtros de categoria, tópicos do usuário e pesquisa.
   Widget _painelLateral() {
     return Material(
       color: const Color(0xFFFFF1EC),
@@ -130,6 +138,7 @@ class _TopicsPageState extends State<TopicsPage> {
     );
   }
 
+  // Seleciona a categoria ou os tópicos do usuário e atualiza a lista.
   void _selecionarFiltro(String categoria, bool meusTopicos) {
     setState(() {
       _categoria = categoria;
@@ -139,11 +148,13 @@ class _TopicsPageState extends State<TopicsPage> {
     if (MediaQuery.sizeOf(context).width < 800) Navigator.pop(context);
   }
 
+  // Mostra o campo de busca dos tópicos.
   void _abrirPesquisa() {
     setState(() => _pesquisaAtiva = true);
     if (MediaQuery.sizeOf(context).width < 800) Navigator.pop(context);
   }
 
+  // Atualiza a lista conforme os tópicos mudam e aplica os filtros escolhidos.
   Widget _listaTopicos() {
     return Column(
       children: [
@@ -153,6 +164,7 @@ class _TopicsPageState extends State<TopicsPage> {
             child: TextField(
               controller: _pesquisaController,
               autofocus: true,
+              // A pesquisa ignora diferenças entre maiúsculas e minúsculas.
               onChanged: (value) => setState(() => _termoBusca = value.trim().toLowerCase()),
               decoration: InputDecoration(
                 hintText: 'Buscar por título, descrição ou autor',
@@ -170,12 +182,14 @@ class _TopicsPageState extends State<TopicsPage> {
             ),
           ),
         Expanded(
+          // Mantém a lista sincronizada com novos tópicos e alterações no Firestore.
           child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: _consulta.snapshots(),
             builder: (context, snapshot) {
         if (snapshot.hasError) return const Center(child: Text('Não foi possível carregar os tópicos.'));
         if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
         final userId = FirebaseAuth.instance.currentUser?.uid;
+        // Combina localmente os filtros de categoria, autoria e texto pesquisado.
         final docs = snapshot.data!.docs.where((doc) {
           final data = doc.data();
           final categoria = (data['category'] ?? '').toString().trim().toLowerCase();
@@ -198,6 +212,7 @@ class _TopicsPageState extends State<TopicsPage> {
     );
   }
 
+  // Permite publicar um tópico com título, descrição e categoria.
   Future<void> _novoTopico() async {
     final titulo = TextEditingController();
     final descricao = TextEditingController();
@@ -221,6 +236,7 @@ class _TopicsPageState extends State<TopicsPage> {
     );
     if (enviar != true || titulo.text.trim().isEmpty || descricao.text.trim().isEmpty) return;
     final user = FirebaseAuth.instance.currentUser!;
+    // Registra o conteúdo e a autoria para que o tópico apareça na lista do ClassHub.
     await _topics.add({
       'title': titulo.text.trim(),
       'description': descricao.text.trim(),
@@ -232,6 +248,7 @@ class _TopicsPageState extends State<TopicsPage> {
   }
 }
 
+// Cartão expansível que mostra os dados do tópico, respostas e ações relacionadas.
 class TopicCard extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> topic;
 
@@ -240,6 +257,7 @@ class TopicCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final data = topic.data();
+    // Só o autor do tópico vê o botão que permite apagá-lo.
     final isAuthor = data['authorId'] == FirebaseAuth.instance.currentUser?.uid;
     final responses = FirebaseFirestore.instance
       .collection('topics')
@@ -274,9 +292,11 @@ class TopicCard extends StatelessWidget {
             child: Align(alignment: Alignment.centerLeft, child: Text(data['description'] ?? '')),
           ),
           StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            // Mantém as respostas sincronizadas enquanto o tópico está aberto.
             stream: responses.snapshots(),
             builder: (context, snapshot) {
               final docs = [...(snapshot.data?.docs ?? [])];
+              // Ordena por votos; em caso de empate, mantém primeiro a resposta mais recente.
               docs.sort((a, b) {
                 final votosA = (a.data()['votesCount'] as num?)?.toInt() ?? 0;
                 final votosB = (b.data()['votesCount'] as num?)?.toInt() ?? 0;
@@ -285,6 +305,7 @@ class TopicCard extends StatelessWidget {
                 final dataB = b.data()['createdAt'] as Timestamp?;
                 return (dataB?.compareTo(dataA ?? Timestamp(0, 0)) ?? 0);
               });
+              // O autor do tópico não pode responder ao próprio tópico.
               return Column(
                 children: [
                   if (docs.isNotEmpty)
@@ -303,6 +324,7 @@ class TopicCard extends StatelessWidget {
     );
   }
 
+  // Confirma a exclusão e remove respostas, votos e tópico em lotes do Firestore.
   Future<void> _apagarTopico(BuildContext context) async {
     final confirmar = await showDialog<bool>(
       context: context,
@@ -317,6 +339,7 @@ class TopicCard extends StatelessWidget {
     );
     if (confirmar != true) return;
 
+    // Coleta os documentos dependentes para apagá-los junto com o tópico.
     try {
       final respostas = await topic.reference.collection('responses').get();
       final referencias = <DocumentReference<Map<String, dynamic>>>[];
@@ -344,6 +367,7 @@ class TopicCard extends StatelessWidget {
   }
 }
 
+// Linha de uma resposta, com identificação do autor, votos e ações disponíveis.
 class ResponseTile extends StatelessWidget {
   final QueryDocumentSnapshot<Map<String, dynamic>> response;
 
@@ -369,33 +393,30 @@ class ResponseTile extends StatelessWidget {
           ),
           title: Text(data['text'] ?? ''),
           subtitle: Text(data['authorEmail'] ?? 'Usuário'),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  InkWell(
-                    onTap: () => _alternarVoto(context, response.reference, vote),
-                    borderRadius: BorderRadius.circular(20),
-                    child: Padding(
-                      padding: const EdgeInsets.all(5),
-                      child: Icon(
-                        voted ? Icons.favorite : Icons.favorite_border,
-                        color: voted ? const Color(0xFFC53D4A) : Colors.grey,
-                        size: 21,
-                      ),
-                    ),
+              InkWell(
+                onTap: () => _alternarVoto(context, response.reference, vote),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(
+                  padding: const EdgeInsets.all(5),
+                  child: Icon(
+                    voted ? Icons.favorite : Icons.favorite_border,
+                    color: voted ? const Color(0xFFC53D4A) : Colors.grey,
+                    size: 21,
                   ),
-                  if (data['authorId'] == userId)
-                    IconButton(
-                      tooltip: 'Apagar resposta',
-                      icon: const Icon(Icons.delete_outline, size: 20),
-                      onPressed: () => _apagarResposta(context, response.reference),
-                    ),
-                ],
+                ),
               ),
               Text('$votes', style: Theme.of(context).textTheme.labelMedium),
+              if (data['authorId'] == userId)
+                IconButton(
+                  tooltip: 'Apagar resposta',
+                  icon: const Icon(Icons.delete_outline, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(width: 40, height: 40),
+                  onPressed: () => _apagarResposta(context, response.reference),
+                ),
             ],
           ),
         );
@@ -403,6 +424,7 @@ class ResponseTile extends StatelessWidget {
     );
   }
 
+  // Alterna o voto em uma transação para manter o documento de voto e o contador coerentes.
   Future<void> _alternarVoto(
     BuildContext context,
     DocumentReference<Map<String, dynamic>> response,
@@ -429,6 +451,7 @@ class ResponseTile extends StatelessWidget {
     }
   }
 
+  // Confirma a exclusão da resposta e remove também os documentos de votos associados.
   Future<void> _apagarResposta(
     BuildContext context,
     DocumentReference<Map<String, dynamic>> response,
@@ -462,11 +485,13 @@ class ResponseTile extends StatelessWidget {
   }
 }
 
+
 class ResponseButton extends StatelessWidget {
   final String topicId;
 
   const ResponseButton({super.key, required this.topicId});
 
+  // Recolhe o texto da resposta, valida as regras e grava o documento no Firestore.
   Future<void> _responder(BuildContext context) async {
     final controller = TextEditingController();
     final texto = await showDialog<String>(
@@ -485,8 +510,10 @@ class ResponseButton extends StatelessWidget {
         ],
       ),
     );
+    // Impede resposta vazia ou o envio após cancelar o diálogo.
     if (texto == null || texto.isEmpty) return;
 
+    // O autor do tópico não pode responder ao próprio tópico.
     final user = FirebaseAuth.instance.currentUser!;
     final topico = await FirebaseFirestore.instance.collection('topics').doc(topicId).get();
     if (topico.data()?['authorId'] == user.uid) {
@@ -496,6 +523,7 @@ class ResponseButton extends StatelessWidget {
       );
       return;
     }
+    // Usa o ID do usuário como ID do documento para limitar a uma resposta por tópico.
     final resposta = FirebaseFirestore.instance
         .collection('topics')
         .doc(topicId)
@@ -503,6 +531,7 @@ class ResponseButton extends StatelessWidget {
         .doc(user.uid);
 
     try {
+      // A transação verifica se já existe uma resposta antes de criar uma nova.
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final existente = await transaction.get(resposta);
         if (existente.exists) throw StateError('Você já respondeu a este tópico.');
